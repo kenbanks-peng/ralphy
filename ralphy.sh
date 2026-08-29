@@ -655,6 +655,11 @@ run_brownfield_task() {
         --json \
         "$prompt" 2>&1 | tee "$output_file"
       ;;
+    pi)
+      pi --mode json --no-session --approve \
+        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+        -- "$prompt" 2>&1 | tee "$output_file"
+      ;;
   esac
 
   local exit_code=$?
@@ -702,6 +707,7 @@ ${BOLD}AI ENGINE OPTIONS:${RESET}
   --qwen              Use Qwen-Code
   --droid             Use Factory Droid
   --copilot           Use GitHub Copilot
+  --pi                Use Pi
   --model <name>      Override default model for any engine
                       Claude: sonnet, haiku, opus
                       OpenCode: gpt-4o, gpt-4o-mini, o1, o3-mini
@@ -830,6 +836,10 @@ parse_args() {
         ;;
       --copilot)
         AI_ENGINE="copilot"
+        shift
+        ;;
+      --pi)
+        AI_ENGINE="pi"
         shift
         ;;
       --model)
@@ -1037,6 +1047,12 @@ check_requirements() {
         exit 1
       fi
       ;;
+    pi)
+      if ! command -v pi &>/dev/null; then
+        log_error "Pi CLI not found. Install from: https://pi.dev"
+        exit 1
+      fi
+      ;;
     *)
       if ! command -v claude &>/dev/null; then
         log_error "Claude Code CLI not found."
@@ -1177,7 +1193,7 @@ get_tasks_markdown() {
 }
 
 get_next_task_markdown() {
-  grep -m1 '^\- \[ \]' "$PRD_FILE" 2>/dev/null | sed 's/^- \[ \] //' | cut -c1-50 || echo ""
+  grep -m1 '^\- \[ \]' "$PRD_FILE" 2>/dev/null | sed 's/^- \[ \] //' || echo ""
 }
 
 count_remaining_markdown() {
@@ -1208,7 +1224,7 @@ get_tasks_yaml() {
 }
 
 get_next_task_yaml() {
-  yq -r '.tasks[] | select(.completed != true) | .title' "$PRD_FILE" 2>/dev/null | head -1 | cut -c1-50 || echo ""
+  yq -r '.tasks[] | select(.completed != true) | .title' "$PRD_FILE" 2>/dev/null | head -1 || echo ""
 }
 
 count_remaining_yaml() {
@@ -1590,31 +1606,35 @@ $never_touch
 "
   fi
 
-  # Add context based on PRD source
+  # Give the engine the task selected by the runner. The runner marks it complete
+  # only after the engine exits successfully.
   case "$PRD_SOURCE" in
-    markdown)
-      prompt="@${PRD_FILE} @$PROGRESS_FILE"
-      ;;
-    yaml)
-      prompt="@${PRD_FILE} @$PROGRESS_FILE"
+    markdown|yaml)
+      prompt+="## Selected Task
+$task_override
+
+Read $PRD_FILE for task context and $PROGRESS_FILE for prior progress.
+Do not select another task or change task completion markers.
+"
       ;;
     github)
-      # For GitHub issues, we include the issue body
+      # For GitHub issues, include the issue body.
       local issue_body=""
       if [[ -n "$task_override" ]]; then
         issue_body=$(get_github_issue_body "$task_override")
       fi
-      prompt="Task from GitHub Issue: $task_override
+      prompt+="Task from GitHub Issue: $task_override
 
 Issue Description:
 $issue_body
 
-@$PROGRESS_FILE"
+Read $PROGRESS_FILE for prior progress.
+"
       ;;
   esac
 
   prompt="$prompt
-1. Find the highest-priority incomplete task and implement it."
+1. Implement the selected task."
 
   local step=2
 
@@ -1633,13 +1653,9 @@ $step. Run linting and ensure it passes before proceeding."
 
   # Adjust completion step based on PRD source
   case "$PRD_SOURCE" in
-    markdown)
+    markdown|yaml)
       prompt="$prompt
-$step. Update the PRD to mark the task as complete (change '- [ ]' to '- [x]')."
-      ;;
-    yaml)
-      prompt="$prompt
-$step. Update ${PRD_FILE} to mark the task as completed (set completed: true)."
+$step. Do not update task completion markers; the runner does this after a successful run."
       ;;
     github)
       prompt="$prompt
@@ -1714,6 +1730,11 @@ run_ai_command() {
         --json \
         --output-last-message "$CODEX_LAST_MESSAGE_FILE" \
         "$prompt" > "$output_file" 2>&1 &
+      ;;
+    pi)
+      pi --mode json --no-session --approve \
+        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+        -- "$prompt" > "$output_file" 2>&1 &
       ;;
     *)
       # Claude Code: use existing approach
@@ -1840,6 +1861,19 @@ parse_ai_result() {
       # Tokens remain 0 for Droid (not exposed in exec mode)
       input_tokens=0
       output_tokens=0
+      ;;
+    pi)
+      local message_end
+      message_end=$(echo "$result" | grep '"type":"message_end"' | tail -1)
+
+      if [[ -n "$message_end" ]]; then
+        response=$(echo "$message_end" | jq -r '[.message.content[]? | select(.type == "text") | .text] | join("") // "Task completed"' 2>/dev/null || echo "Task completed")
+      fi
+      input_tokens=$(echo "$result" | jq -r 'select(.usage) | .usage.input // .usage.input_tokens // .usage.inputTokens // empty' 2>/dev/null | tail -1)
+      output_tokens=$(echo "$result" | jq -r 'select(.usage) | .usage.output // .usage.output_tokens // .usage.outputTokens // empty' 2>/dev/null | tail -1)
+      response=${response:-Task completed}
+      input_tokens=${input_tokens:-0}
+      output_tokens=${output_tokens:-0}
       ;;
     codex)
       if [[ -n "$CODEX_LAST_MESSAGE_FILE" ]] && [[ -f "$CODEX_LAST_MESSAGE_FILE" ]]; then
@@ -2069,10 +2103,8 @@ run_single_task() {
       CODEX_LAST_MESSAGE_FILE=""
     fi
 
-    # Mark task complete for GitHub issues (since AI can't do it)
-    if [[ "$PRD_SOURCE" == "github" ]]; then
-      mark_task_complete "$current_task"
-    fi
+    # Mark the selected task complete only after a successful engine run.
+    mark_task_complete "$current_task"
 
     # Sync PRD to GitHub issue if configured
     sync_prd_to_issue

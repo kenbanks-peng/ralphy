@@ -89,6 +89,7 @@ ralphy --qwen       # Qwen-Code
 ralphy --droid      # Factory Droid
 ralphy --copilot    # GitHub Copilot
 ralphy --gemini     # Gemini CLI
+ralphy --pi         # Pi
 ```
 
 ### Model Override
@@ -329,7 +330,7 @@ ralphy --parallel --sandbox
 ## Requirements
 
 **Required:**
-- AI CLI: [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](https://opencode.ai/docs/), [Cursor](https://cursor.com), Codex, Qwen-Code, [Factory Droid](https://docs.factory.ai/cli/getting-started/quickstart), [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli), or [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+- AI CLI: [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](https://opencode.ai/docs/), [Cursor](https://cursor.com), Codex, Qwen-Code, [Factory Droid](https://docs.factory.ai/cli/getting-started/quickstart), [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [Pi](https://pi.dev)
 
 **npm version (`ralphy-cli`):**
 - Node.js 18+ or Bun
@@ -355,6 +356,7 @@ ralphy --parallel --sandbox
 | Droid | `droid exec` | `--auto medium` | duration |
 | Copilot | `copilot` | `--yolo` | tokens |
 | Gemini | `gemini` | `--yolo` | tokens + cost |
+| Pi | `pi` | `--approve` | tokens |
 
 When an engine exits non-zero, ralphy includes the last lines of CLI output in the error message to make debugging easier.
 
